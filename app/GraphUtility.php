@@ -4,16 +4,6 @@ use App\Models\Route;
 use App\Models\Region;
 use App\Models\Place;
 
-//text-to-audio generator
-// require '../vendor/autoload.php'; // Load Google Cloud PHP client library
-
-// use Google\Cloud\TextToSpeech\V1\AudioConfig;
-// use Google\Cloud\TextToSpeech\V1\AudioEncoding;
-// use Google\Cloud\TextToSpeech\V1\SynthesisInput;
-// use Google\Cloud\TextToSpeech\V1\TextToSpeechClient;
-// use Google\Cloud\TextToSpeech\V1\VoiceSelectionParams;
- 
-// use IBM\Watson\TextToSpeech\TextToSpeech;
 class GraphUtility
 {
     private static $graph = null;
@@ -55,6 +45,8 @@ class GraphUtility
         return $graph;
     }//end constructGraphFromDatabase
 
+
+    //function to findShortestPath
     public static function findShortestPath($source, $destination)
     {
         $finalDestinationId=$destination;
@@ -203,16 +195,18 @@ class GraphUtility
             'node_distance_direction_array' => $nodeDistanceDirArray,
             'total_distance' => $totalDistance
         ];
-    }// end get the path
+    }//function to findShortestPath
 
-    
+
+    //generateNavigationInstructions
     public static function generateNavigationInstructions($navigationData) {
         $path = $navigationData['path'];
         $nodeDistanceDirArray = $navigationData['node_distance_direction_array'];
         $totalDistance = $navigationData['total_distance'];
     
         $finalDestination = end($path); // Last node is the final destination
-    
+        $finalDestinationName = place::find($finalDestination)->name;
+        $finalDestinationGuideWord = place::find($finalDestination)->guide_word;
         // Synonyms dictionary
         $synonyms = [
             'start' => ['commence', 'begin', 'embark', 'set out'],
@@ -226,7 +220,7 @@ class GraphUtility
         // Map numeric direction codes to cardinal directions
         $directionsMap = ['','north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'];
     
-        $instructions = "You are $totalDistance meters away from your destination. ";
+        $instructions = "You are $totalDistance meters away from $finalDestinationName . ";
         $previousWord = ''; // To keep track of the previously used word
     
         foreach ($nodeDistanceDirArray as $index => $nodeData) {
@@ -244,24 +238,88 @@ class GraphUtility
                 $currentWord = $synonyms[$currentWord][array_rand($synonyms[$currentWord])];
             }
     
-            if ($distance > 0) {
+            if ($direction != null) {
                 // Use the current word, direction, and point in the instructions
                 $instructions .= "$currentWord $currentNode ";
                 $instructions .= "proceed $distance meters ";
-                $instructions .= "{$synonyms['direction'][array_rand($synonyms['direction'])]} $direction. ";
+                $instructions .= "{$synonyms['direction'][array_rand($synonyms['direction'])]} $direction . ";
             } else {
                 $destinationSynonym = $synonyms['destination'][array_rand($synonyms['destination'])];
-                $instructions .= "You have reached your $destinationSynonym, node $finalDestination. ";
+                $instructions .= "$finalDestinationGuideWord. ";
+                $instructions .= "You have reached your $destinationSynonym, $finalDestinationName. ";
             }
         }
     
         return [           
                 'path' => $path,
                 'instructions'=>$instructions,
-                       // 'node_distance_direction_array'=>$nodeDistanceDirArray
+                //'node_distance_direction_array'=>$nodeDistanceDirArray
                         
                 ];
-    }
+    }//end generateNavigationInstructions
     
 
+    // Function to generate an MP3 file from text
+    public static function generateMP3FromText($text, $lang = "en") {
+        // Define a static filename
+        $file = "output.mp3";
+        $filepath = public_path("audio/") . $file; // Use public_path() to ensure correct directory path
+
+        // Cut the first 200 characters (if needed)
+        if (strlen($text) > 200) {
+            $text = substr($text, 0, 200);
+        }
+
+        // Check if the 'audio' directory exists, create it if it doesn't
+        if (!is_dir(public_path("audio/"))) {
+            mkdir(public_path("audio/"), 0777, true);
+            } elseif (substr(sprintf('%o', fileperms(public_path('audio/'))), -4) != "0777") {
+                chmod(public_path("audio/"), 0777);
+            }
+
+        // Function to fetch the MP3 content using cURL with a user-agent
+        function fetchMp3($url) {
+            $ch = curl_init($url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3');
+            $response = curl_exec($ch);
+
+            if (curl_errno($ch)) {
+                echo 'Curl error: ' . curl_error($ch);
+                return false;
+            }
+
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            if ($httpCode !== 200) {
+                echo "HTTP error: " . $httpCode;
+                return false;
+            }
+
+            curl_close($ch);
+            return $response;
+        }
+
+        // Generate the URL for the Google Translate TTS service
+        $url = 'http://translate.google.com/translate_tts?ie=UTF-8&q=' . urlencode($text) . '&tl=' . $lang . '&total=1&idx=0&textlen=5&prev=input&client=tw-ob';
+
+        // Fetch the MP3 content
+        $mp3 = fetchMp3($url);
+
+        // Write the new MP3 file to the 'audio' directory
+        if ($mp3 !== false) {
+            if (file_put_contents($filepath, $mp3) === false) {
+                echo "Failed to write the MP3 file";
+                return false;
+            } else {
+                return $filepath; // Return the filepath if successful
+            }
+        } else {
+            echo "Failed to fetch the MP3 content";
+            return false;
+        }
+    }
+    // end generate an MP3 file from text
+
 }
+?>
